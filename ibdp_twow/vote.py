@@ -16,6 +16,8 @@ from utils.views import EmptyView
 
 
 async def formatted_options(interaction: discord.Interaction, twow: Twow, vote_count = 0):
+    vote_chip = f' [{vote_count} recorded vote(s)]' if vote_count else ''
+
     async with db.session() as session, session.begin():
         stmt = db.select(Response).where(
             Response.twow_id == twow.id,
@@ -35,28 +37,33 @@ async def formatted_options(interaction: discord.Interaction, twow: Twow, vote_c
         return 'Not enough responses!', EmptyView(twow)
 
     vote_pairs = [(vote.upvoted_id, vote.downvoted_id) for vote in votes]
-    c = Counter({response.id: 0 for response in responses})
-    c.update(sum(vote_pairs, ()))  # flattened vote_pairs
 
+    # select least-seen prompt
+    c = Counter({response.id: 0 for response in responses})
+    c.update(sum(vote_pairs, ()))  # "sum" flattens vote_pairs
     freqs = c.most_common()
     _, lowest = freqs[-1]
-    pool = [response for response, freq in freqs if freq == lowest]
-    r1 = random.choice(pool)
+    id_pool = [response_id for response_id, freq in freqs if freq == lowest]
 
-    pool = [response for response in responses if any(response in pair and r1 in pair for pair in vote_pairs)]
-    r2 = random.choice(pool)
+    # confusing syntax - this unpacks a single-element collection (only one element is expected)
+    r1 ,= [response for response in responses if response.id == random.choice(id_pool)]
+
+    response_pool = [response for response in responses
+                     if response.id != r1.id and not any(response.id in pair and r1.id in pair for pair in vote_pairs)]
+    # if all possible vote combinations have been recorded, this list should be empty
+    if not response_pool:
+        content = f"You have voted the maximum number of times for this round! {vote_chip}"
+        view = EmptyView(twow)
+        return content, view
+    r2 = random.choice(response_pool)
 
     if random.random() < 0.5:
         r2, r1 = r1, r2
 
-    vote_chip = f' [{vote_count} recorded vote(s)]' if vote_count else ''
+
     content = f"Which response do you prefer?{vote_chip}\n**Option 1** - `{r1.content}`\n**Option 2** - `{r2.content}`"
     view = ParticipantVoteView(twow, r1, r2, count=vote_count + 1)
     return content, view
-
-
-async def handle_user_vote():
-    pass
 
 
 
@@ -129,4 +136,4 @@ class VotingView(discord.ui.View):
             )
             votes = (await session.scalars(stmt)).all()
         content, view = await formatted_options(interaction, self.twow, vote_count=len(votes))
-        await interaction.response.send_message(content, view=view, ephemeral=True)
+        await interaction.response.send_message(content=content, view=view, ephemeral=True)

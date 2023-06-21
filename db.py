@@ -34,6 +34,7 @@ class Twow(Base):
     id = mapped_column(Integer, primary_key=True, autoincrement=True)
     guild_id = mapped_column(Integer)
     channel_id = mapped_column(ForeignKey('channels.id'))
+    private_channel_id = mapped_column(Integer, nullable=True)
     current_message_id = mapped_column(Integer, nullable=True)
     current_round = mapped_column(Integer, default=0)
     state = mapped_column(Enum(TwowState))
@@ -44,15 +45,16 @@ class TwowChannel(Base):
     __tablename__ = "channels"
 
     id = mapped_column(Integer, primary_key=True, autoincrement='ignore_fk')
+    host_id = mapped_column(Integer)
     current_twow_id = mapped_column(Integer, nullable=True)
 
 
-class Prompts(Base):
+class Prompt(Base):
     __tablename__ = "prompts"
 
     id = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id = mapped_column(Integer)
-    prompt = mapped_column(String)
+    content = mapped_column(String)
     timestamp = mapped_column(DateTime(timezone=True), default=func.now())
 
 

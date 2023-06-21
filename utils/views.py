@@ -5,7 +5,7 @@ import discord
 
 class EmptyView(discord.ui.View):
     def __init__(self, twow):
-        super().__init__()
+        super().__init__(timeout=None)
         self.twow = twow
 
 
