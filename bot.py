@@ -105,6 +105,12 @@ async def activate(interaction: discord.Interaction, host: discord.Role):
     """
     Allow TWOW seasons to take place in a channel. Must assign a role as TWOW host.
     """
+    if not isinstance(interaction.channel, discord.TextChannel):
+        await interaction.response.send_message(f'🚫 TWOW only works in text channels.')
+        state = client.twows[interaction.channel_id].state.name
+        logger.warning(f'{info_chip(interaction)} Activation attempted in an unsupported channel.')
+        return
+
     if interaction.channel_id in client.twows:
         await interaction.response.send_message(f'🚫 TWOW already active in this channel. Please use {SIGNUP_CMD} to start TWOW here.')
         state = client.twows[interaction.channel_id].state.name
@@ -167,6 +173,23 @@ async def twow_cmd(
             item.disabled = True
         await old_message.edit(content=old_message.content, view=view)
         view.stop()
+    
+    # create new TWOW if necessary
+    if new_state == TwowState.REGISTERING:
+        async with db.session() as session:
+            twow_channel = await session.get(TwowChannel, interaction.channel_id)
+            twow = Twow(
+                guild_id = interaction.guild_id,
+                channel_id = interaction.channel_id,
+                current_round = 0,
+                state = TwowState.REGISTERING
+            )
+            session.add_all([twow_channel, twow])
+            await session.commit()
+
+            twow_channel.current_twow_id = twow.id
+            await session.commit()
+        client.twows[interaction.channel_id] = twow
 
     view = view_cls(twow)
     await interaction.response.send_message(message_content(twow), view=view)
@@ -183,22 +206,12 @@ async def twow_cmd(
 @client.tree.command()
 async def signup(interaction: discord.Interaction, prompt: str):
     """
-    Begin a TWOW season.
+    Create a new TWOW season and open sign-ups.
     """
     async def db_entry_update(session, twow, message):
-        twow_channel = await session.get(TwowChannel, interaction.channel_id)
-        new_twow = Twow(
-            guild_id = interaction.guild_id,
-            channel_id = interaction.channel_id,
-            current_message_id = message.id,
-            current_round = 0,
-            state = TwowState.REGISTERING
-        )    
-        session.add_all([twow_channel, new_twow])
-        await session.commit()
-
-        client.twows[interaction.channel_id] = new_twow
-        twow_channel.current_twow_id = new_twow.id
+        twow.current_message_id = message.id
+        twow.current_round = 0
+        twow.state = TwowState.REGISTERING
 
     await twow_cmd(
         interaction,
@@ -209,7 +222,7 @@ async def signup(interaction: discord.Interaction, prompt: str):
             TwowState.VOTING: '🚫 Cannot open sign-ups in the middle of a TWOW season.',
             TwowState.IDLE: '🚫 Cannot open sign-ups in the middle of a TWOW season.'
         },
-        message_content=lambda twow: f'TWOW sign-ups are open! Prompt:\n# {prompt}',
+        message_content=lambda twow: f'TWOW sign-ups are open! (ID: {twow.id})\nRound {twow.current_round} Prompt:\n# {prompt}',
         view_cls=game.signup.SignUpView,
         db_func=db_entry_update
     )
@@ -272,7 +285,7 @@ async def conclude(interaction: discord.Interaction):
         twow.current_message_id = message.id
         twow.state = TwowState.IDLE
 
-    await twow_cmd(
+    twow = await twow_cmd(
         interaction,
         new_state=TwowState.IDLE,
         invalid_entry_dict={
@@ -285,6 +298,48 @@ async def conclude(interaction: discord.Interaction):
         view_cls=EmptyView,  # TODO: fix this
         db_func=db_entry_update
     )
+
+    if twow:
+        await game.results.update(twow)
+
+@client.tree.command()
+async def recalculate_results(interaction: discord.Interaction):
+    """
+    Recalculate the results for the current TWOW rounds.
+    """
+    twow = client.twows[interaction.channel_id]
+    if twow.state != TwowState.IDLE:
+        await interaction.response.send_message(f'🚫 You can only present results after concluding voting.')
+        logger.warning(f'{info_chip(interaction)} Result presentation attempted while not IDLE.')
+        return
+    await game.results.update(twow)
+    await interaction.response.send_message('Results recalculated!', ephemeral=True)
+
+@client.tree.command()
+async def display_results(interaction: discord.Interaction, channel: Optional[discord.abc.GuildChannel] = None):
+    """
+    Present the results for the current TWOW round.
+    """
+    await interaction.response.defer(ephemeral=True)
+
+    channel = channel or interaction.channel
+    if isinstance(channel, discord.TextChannel):
+        channel = await channel.create_thread(name=f'TWOW {twow.id}.{twow.current_round} Results', type=discord.ChannelType.public_thread)
+    elif not isinstance(channel, discord.Thread):
+        await interaction.followup.send('Invalid channel type.', ephemeral=True)
+        return
+    elif isinstance(channel.parent, discord.ForumChannel):
+        await interaction.followup.send('Cannot use this command in a forum channel!', ephemeral=True)
+        return
+
+    twow = client.twows[channel.parent_id]
+    if twow.state != TwowState.IDLE:
+        await interaction.response.send_message(f'🚫 You can only present results after concluding voting.')
+        logger.warning(f'{info_chip(interaction)} Result presentation attempted while not IDLE.')
+        return
+
+    status = await game.results.display(twow, channel)
+    await interaction.followup.send(status, ephemeral=True)
 
 
 @client.tree.command()
@@ -355,7 +410,7 @@ async def viewtable(interaction: discord.Interaction, name: str):
     }[name]
     async with db.session() as session, session.begin():
         stmt = db.select(cls)
-        votes = (await session.scalars(stmt)).all()
-    await interaction.response.send_message(str(votes))
+        entries = (await session.scalars(stmt)).all()
+    await interaction.response.send_message('```' + '\n'.join(repr(entry) for entry in entries) + '```')
 
 client.run(config['discord']['token'])

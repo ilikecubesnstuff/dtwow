@@ -45,8 +45,10 @@ async def formatted_options(interaction: discord.Interaction, twow: Twow, vote_c
     _, lowest = freqs[-1]
     id_pool = [response_id for response_id, freq in freqs if freq == lowest]
 
+    id = random.choice(id_pool)
+    logger.debug([response for response in responses if response.id == id])
+    r1 ,= [response for response in responses if response.id == id]
     # confusing syntax - this unpacks a single-element collection (only one element is expected)
-    r1 ,= [response for response in responses if response.id == random.choice(id_pool)]
 
     response_pool = [response for response in responses
                      if response.id != r1.id and not any(response.id in pair and r1.id in pair for pair in vote_pairs)]
@@ -78,6 +80,7 @@ class ParticipantVoteView(discord.ui.View):
 
     @discord.ui.button(
         label='Option 1',
+        row=0,
         style=discord.ButtonStyle.blurple,
         custom_id='vote:left'
     )
@@ -97,6 +100,7 @@ class ParticipantVoteView(discord.ui.View):
 
     @discord.ui.button(
         label='Option 2',
+        row=1,
         style=discord.ButtonStyle.blurple,
         custom_id='vote:right'
     )

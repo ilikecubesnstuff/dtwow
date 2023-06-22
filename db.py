@@ -40,6 +40,9 @@ class Twow(Base):
     state = mapped_column(Enum(TwowState))
     start_timestamp = mapped_column(DateTime(timezone=True), default=func.now())
 
+    def __repr__(self):
+        return f"Twow({self.state}, round={self.current_round}, channel={self.channel_id}, guild={self.guild_id})"
+
 
 class TwowChannel(Base):
     __tablename__ = "channels"

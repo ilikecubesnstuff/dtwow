@@ -12,6 +12,9 @@ class Participant(Base):
     moniker = mapped_column(String(32), nullable=True)
     score = mapped_column(Integer, default=0)
 
+    def __repr__(self):
+        return f"Participant({self.id}, twow_id={self.twow_id}, user_id={self.user_id}, moniker='{self.moniker}', score={self.score})"
+
     @classmethod
     async def fetch_by_user(cls, *, twow_id, user_id):
         async with db.session() as session:
@@ -32,6 +35,12 @@ class Response(Base):
     round = mapped_column(Integer)
     content = mapped_column(String, nullable=True)
     rating = mapped_column(Float, default=1000.)
+    upvotes = mapped_column(Integer, default=0)
+    downvotes = mapped_column(Integer, default=0)
+    score = mapped_column(Integer, nullable=True)
+
+    def __repr__(self):
+        return f"Response({self.id}, '{self.content}', twow_id={self.twow_id}, user_id={self.user_id}, round={self.round}, rating={self.rating}, score={self.score})"
 
     @classmethod
     async def fetch_by_round_and_user(cls, *, twow_id, twow_round, user_id):
@@ -51,6 +60,8 @@ class Response(Base):
         expected_value = 1 / (1 + 10 ** (rating_difference / 400))  # adapted from https://en.wikipedia.org/wiki/Elo_rating_system
         async with db.session() as session, session.begin():
             session.add_all([upvoted, downvoted])
+            upvoted.upvotes += 1
+            downvoted.downvotes += 1
             upvoted.rating += 50 * expected_value * w1
             downvoted.rating -= 50 * expected_value * w2
 
@@ -64,3 +75,6 @@ class Vote(Base):
     round = mapped_column(Integer)
     upvoted_id = mapped_column(ForeignKey('ib_responses.id'))
     downvoted_id = mapped_column(ForeignKey('ib_responses.id'))
+
+    def __repr__(self):
+        return f"Vote({self.id}, {self.upvoted_id}, {self.downvoted_id}, twow_id={self.twow_id}, user_id={self.user_id}, round={self.round})"
