@@ -4,7 +4,7 @@ from sqlalchemy.orm import DeclarativeBase, MappedAsDataclass, Mapped, mapped_co
 from sqlalchemy.ext.asyncio import AsyncAttrs, create_async_engine, async_sessionmaker
 import sqlalchemy.sql.functions as func
 
-engine = create_async_engine("sqlite+aiosqlite:///twow_data.db")
+engine = create_async_engine('sqlite+aiosqlite:///twow_data.db')
 session = async_sessionmaker(engine, expire_on_commit=False)
 
 
@@ -29,7 +29,7 @@ class Base(AsyncAttrs, DeclarativeBase):
 
 
 class Twow(Base):
-    __tablename__ = "twows"
+    __tablename__ = 'twows'
 
     id = mapped_column(Integer, primary_key=True, autoincrement=True)
     guild_id = mapped_column(Integer)
@@ -41,19 +41,29 @@ class Twow(Base):
     start_timestamp = mapped_column(DateTime(timezone=True), default=func.now())
 
     def __repr__(self):
-        return f"Twow({self.state}, round={self.current_round}, channel={self.channel_id}, guild={self.guild_id})"
+        return f'Twow({self.state}, round={self.current_round}, channel={self.channel_id}, guild={self.guild_id})'
 
 
 class TwowChannel(Base):
-    __tablename__ = "channels"
+    __tablename__ = 'channels'
 
     id = mapped_column(Integer, primary_key=True, autoincrement='ignore_fk')
     host_id = mapped_column(Integer)
     current_twow_id = mapped_column(Integer, nullable=True)
 
+    def __repr__(self):
+        return f'TwowChannel({self.id}, host_id={self.host_id}, twow_id={self.current_twow_id})'
+
+    @classmethod
+    async def fetch_by_id(cls, channel_id, /):
+        global session
+        async with session() as session, session.begin():
+            channel = await session.get(cls, channel_id)
+        return channel
+
 
 class Prompt(Base):
-    __tablename__ = "prompts"
+    __tablename__ = 'prompts'
 
     id = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id = mapped_column(Integer)

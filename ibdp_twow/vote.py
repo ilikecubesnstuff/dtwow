@@ -16,6 +16,9 @@ from utils.views import EmptyView
 
 
 async def formatted_options(interaction: discord.Interaction, twow: Twow, vote_count = 0):
+    """
+    Fetch and format prompt responses for a user to vote between.
+    """
     vote_chip = f' [{vote_count} recorded vote(s)]' if vote_count else ''
 
     async with db.session() as session, session.begin():

@@ -76,7 +76,7 @@ async def update(twow: Twow):
             session.add_all(participants)
             for participant in participants:
                 participant.score += round_score[participant.user_id]
-        
+
 
 async def display(twow: Twow, thread: discord.Thread):
     async with db.session() as session:
@@ -105,7 +105,7 @@ async def display(twow: Twow, thread: discord.Thread):
                 logger.warning(f'Fetching member with ID {participant.user_id} failed.')
                 return 'HTTP Exception occurred.'
 
-    PAGE_SIZE = 3
+    PAGE_SIZE = 10
     for clump in clumped(enumerate(sorted(responses, key=lambda r: r.rating, reverse=True), start=1), n=PAGE_SIZE):
         embed = discord.Embed()
         for rank, response in clump:

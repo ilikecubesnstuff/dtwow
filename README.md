@@ -4,14 +4,19 @@ A Discord bot for playing a Discord-oriented variant of Ten Words Of Wisdom (TWO
 ## Example Configuration File
 An example `config.ini`:
 ```ini
-token = <static token goes here>
+[game]
+preset = ibdp_twow
+
+[discord]
+token = <static token here>
 status = online
-game = ibdp_twow
-db = sqlite+aiosqlite:///twow_data.db
+
+[test server]
+id = <test server ID here>
 
 [activity]
-text = activity text here
-type = activity type here
+text = <custom text here>
+type = listening
 ```
 
 ## To run the bot

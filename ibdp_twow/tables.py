@@ -4,7 +4,7 @@ from db import Integer, String, Float, ForeignKey
 
 
 class Participant(Base):
-    __tablename__ = "ib_participants"
+    __tablename__ = 'ib_participants'
 
     id = mapped_column(Integer, primary_key=True, autoincrement=True)
     twow_id = mapped_column(ForeignKey('twows.id'))
@@ -13,7 +13,7 @@ class Participant(Base):
     score = mapped_column(Integer, default=0)
 
     def __repr__(self):
-        return f"Participant({self.id}, twow_id={self.twow_id}, user_id={self.user_id}, moniker='{self.moniker}', score={self.score})"
+        return f'Participant({self.id}, twow_id={self.twow_id}, user_id={self.user_id}, moniker="{self.moniker}", score={self.score})'
 
     @classmethod
     async def fetch_by_user(cls, *, twow_id, user_id):
@@ -27,7 +27,7 @@ class Participant(Base):
 
 
 class Response(Base):
-    __tablename__ = "ib_responses"
+    __tablename__ = 'ib_responses'
 
     id = mapped_column(Integer, primary_key=True, autoincrement=True)
     twow_id = mapped_column(ForeignKey('twows.id'))
@@ -40,7 +40,7 @@ class Response(Base):
     score = mapped_column(Integer, nullable=True)
 
     def __repr__(self):
-        return f"Response({self.id}, '{self.content}', twow_id={self.twow_id}, user_id={self.user_id}, round={self.round}, rating={self.rating}, score={self.score})"
+        return f'Response({self.id}, "{self.content}", twow_id={self.twow_id}, user_id={self.user_id}, round={self.round}, rating={self.rating}, score={self.score})'
 
     @classmethod
     async def fetch_by_round_and_user(cls, *, twow_id, twow_round, user_id):
@@ -55,6 +55,9 @@ class Response(Base):
 
     @classmethod
     async def update_ratings(cls, *, upvoted, downvoted, weights: tuple[int] = (1, 1)):
+        """
+        Update response entries in the database based on vote.
+        """
         w1, w2 = weights
         rating_difference = upvoted.rating - downvoted.rating
         expected_value = 1 / (1 + 10 ** (rating_difference / 400))  # adapted from https://en.wikipedia.org/wiki/Elo_rating_system
@@ -67,7 +70,7 @@ class Response(Base):
 
 
 class Vote(Base):
-    __tablename__ = "ib_votes"
+    __tablename__ = 'ib_votes'
 
     id = mapped_column(Integer, primary_key=True, autoincrement=True)
     twow_id = mapped_column(ForeignKey('twows.id'))
@@ -77,4 +80,4 @@ class Vote(Base):
     downvoted_id = mapped_column(ForeignKey('ib_responses.id'))
 
     def __repr__(self):
-        return f"Vote({self.id}, {self.upvoted_id}, {self.downvoted_id}, twow_id={self.twow_id}, user_id={self.user_id}, round={self.round})"
+        return f'Vote({self.id}, {self.upvoted_id}, {self.downvoted_id}, twow_id={self.twow_id}, user_id={self.user_id}, round={self.round})'

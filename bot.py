@@ -3,12 +3,11 @@ from configparser import ConfigParser
 config = ConfigParser()
 config.read(sys.argv[1])
 
-from typing import Optional, Coroutine
-
-# imports for "eval" command
 import io
 import textwrap
 import contextlib
+
+from typing import Optional, Literal, Coroutine
 
 # dependency imports
 import discord
@@ -63,6 +62,9 @@ class TwowClient(discord.Client):
             stmt = db.select(Twow)
             result = await session.scalars(stmt)
             twows: list[Twow] = result.all()
+        
+        for channel in channels:
+            self.twows[channel.id] = Twow(state=TwowState.HIBERNATING)
 
         twows = [twow for twow in twows if any(channel.current_twow_id == twow.id for channel in channels)]
         for twow in twows:
@@ -70,9 +72,8 @@ class TwowClient(discord.Client):
             view_cls = state_view_map[twow.state]
             self.add_view(view_cls(twow), message_id=twow.current_message_id)
 
-        # This copies the global commands over to your guild.
-        MY_GUILD = discord.Object(id=1114592296747413504)  # Testing server.
-        self.tree.copy_global_to(guild=MY_GUILD)
+        MY_GUILD = discord.Object(id=int(config['test server']['id']))
+        # self.tree.copy_global_to(guild=MY_GUILD)
         await self.tree.sync(guild=MY_GUILD)
 
     async def on_ready(self):
@@ -84,23 +85,98 @@ class TwowClient(discord.Client):
             )
         )
 
-        logger.info(f"Connected! {len(self.twows)} TWOW(s) across {len(self.guilds)} server(s).")
+        logger.info(f'Connected! {len(self.twows)} TWOW(s) across {len(self.guilds)} server(s).')
         for channel, twow in self.twows.items():
-            logger.debug(f"{channel} {twow.state}")
+            logger.debug(f'{channel} {twow.state}')
+
+        self.cmds = {ac.name: ac for ac in await self.tree.fetch_commands()}
+        logger.info(f'This client has {len(self.cmds)} global commands.')
 
 intents = discord.Intents.none()
 intents.guilds = True
 client = TwowClient(intents=intents)
 
-ACTIVATE_CMD = '</activate:1115921695639863377>'
-SIGNUP_CMD = '</signup:1115877522572312587>'
-
-
 def info_chip(interaction: discord.Interaction):
-    return f"[{interaction.guild.name} | {interaction.channel.name} | {interaction.user.name}]"
+    """
+    Prints interaction state for logging purposes.
+    """
+    return f'[{interaction.guild.name} | {interaction.channel.name} | {interaction.user.name}]'
 
+def format_cmd(name: str):
+    """
+    Mentions command of a particular name.
+    """
+    cmd = client.cmds[name]
+    return f'</{cmd.name}:{cmd.id}>'
+
+
+# public commands
 
 @client.tree.command()
+@app_commands.guild_only()
+async def help(interaction: discord.Interaction):
+    """
+    Confused about TWOW? Let me explain it to you!
+    """
+    twow_host_ids = []  # TODO: maybe cache this part somehow
+    async with db.engine.connect() as conn:
+        async for twow_channel in await conn.stream(db.select(TwowChannel)):
+            twow_host_ids.append(twow_channel.host_id)
+
+    is_admin = interaction.user.resolved_permissions.administrator
+    is_twow_host = any(any(host_id == role.id for role in interaction.user.roles) for host_id in twow_host_ids)
+    embed = discord.Embed(
+        title = 'Help Menu',
+        description = 'I am an [open source](https://github.com/ilikecubesnstuff/dtwow) bot created by <@279567692334235649>.\n' + \
+                      'I adapt the game Ten Words of Wisdom (TWOW) created by [carykh](https://www.youtube.com/@carykh).\n' + \
+                      'Note: An admin is required to activate TWOW in a text channel.'
+    )
+    if not is_admin and not is_twow_host:
+        embed.description = 'I am an [open source](https://github.com/ilikecubesnstuff/dtwow) bot created by <@279567692334235649>.\n' + \
+                            'I adapt the game Ten Words of Wisdom (TWOW) created by [carykh](https://www.youtube.com/@carykh).\n' + \
+                            'The rules are explained in [episode 0A](https://youtu.be/S64R-_LVHuY) on his YouTube channel.\n' + \
+                            'This bot adapts a few rules to make the format Discord-friendly.\n' + \
+                            '- Participants are given a prompt to respond to in 10 words.\n' + \
+                            '- Everyone then votes for their favorite responses.\n' + \
+                            '- Participants earn a score based on their ranking.\n' + \
+                            '- For the IB server, these rounds continue analogous to IB subject grades until a maximum score of 45 is reached.\n' + \
+                            'Join the TWOW channel to participate!\n' + \
+                            'Note: An admin is required to activate TWOW in a text channel.'
+
+    for command in client.tree.walk_commands():
+        if command.name in ['eval', 'viewtable', 'sync']:
+            continue
+        if command.name in ['activate', 'deactivate']:
+            if is_admin:
+                embed.add_field(
+                    name = format_cmd(command.name),
+                    value = 'Admin-only command. ' + command.description,
+                    inline = False
+                )
+            continue
+        if command.name in ['signup', 'prompt', 'vote', 'conclude', 'recalculate', 'display', 'hibernate']:
+            if is_twow_host:
+                embed.add_field(
+                    name = format_cmd(command.name),
+                    value = 'TWOW host command. ' + command.description,
+                    inline = False
+                )
+            continue
+        embed.add_field(
+            name = format_cmd(command.name),
+            value = command.description,
+            inline = False
+        )
+    
+    await interaction.response.send_message(embed=embed)
+
+
+# administrative commands
+
+@client.tree.command()
+@app_commands.default_permissions(administrator=True)
+@app_commands.guild_only()
+@app_commands.describe(host='TWOW host role. (Users with this role must have permission to manage threads in this channel.)')
 async def activate(interaction: discord.Interaction, host: discord.Role):
     """
     Allow TWOW seasons to take place in a channel. Must assign a role as TWOW host.
@@ -112,7 +188,7 @@ async def activate(interaction: discord.Interaction, host: discord.Role):
         return
 
     if interaction.channel_id in client.twows:
-        await interaction.response.send_message(f'🚫 TWOW already active in this channel. Please use {SIGNUP_CMD} to start TWOW here.')
+        await interaction.response.send_message(f'🚫 TWOW already active in this channel. Please use {format_cmd("signup")} to start TWOW here.')
         state = client.twows[interaction.channel_id].state.name
         logger.warning(f'{info_chip(interaction)} Activation attempted while {state}. {state} state preserved.')
         return
@@ -126,12 +202,14 @@ async def activate(interaction: discord.Interaction, host: discord.Role):
 
 
 @client.tree.command()
+@app_commands.default_permissions(administrator=True)
+@app_commands.guild_only()
 async def deactivate(interaction: discord.Interaction):
     """
     Disallow TWOW season to take place in a channel. This will end on-going TWOW seasons.
     """
     if interaction.channel_id not in client.twows:
-        await interaction.response.send_message(f'🚫 TWOW already inactive in this channel. Please use {ACTIVATE_CMD} to activate TWOW here.')
+        await interaction.response.send_message(f'🚫 TWOW already inactive in this channel. Please use {format_cmd("activate")} to activate TWOW here.')
         logger.warning(f'{info_chip(interaction)} INACTIVE attempted while INACTIVE. INACTIVE state preserved.')
         return
 
@@ -144,6 +222,8 @@ async def deactivate(interaction: discord.Interaction):
     logger.info(f'{info_chip(interaction)} TWOW deactivated, state set to INACTIVE.')
 
 
+# host commands (requires manage thread permissions)
+
 async def twow_cmd(
         interaction: discord.Interaction,
         new_state: TwowState,
@@ -151,8 +231,11 @@ async def twow_cmd(
         message_content: str,
         view_cls,
         db_func: Coroutine):
+    """
+    Execute a valid step forward in the TWOW process. This is only called through application commands in this file.
+    """
     if interaction.channel_id not in client.twows:
-        await interaction.response.send_message(f'🚫 No TWOW present in this channel. Please use {ACTIVATE_CMD} to activate TWOW here.')
+        await interaction.response.send_message(f'🚫 TWOW is not active in this channel. Please use {format_cmd("activate")} to activate TWOW here.')
         logger.warning(f'{info_chip(interaction)} {new_state.name} attempted while INACTIVE. INACTIVE state preserved.')
         return
 
@@ -204,9 +287,12 @@ async def twow_cmd(
 
 
 @client.tree.command()
+@app_commands.default_permissions(manage_threads=True)
+@app_commands.guild_only()
+@app_commands.describe(prompt='Prompt given to server members for the sign-up round.')
 async def signup(interaction: discord.Interaction, prompt: str):
     """
-    Create a new TWOW season and open sign-ups.
+    Create a new TWOW season and open sign-ups with a prompt.
     """
     async def db_entry_update(session, twow, message):
         twow.current_message_id = message.id
@@ -229,9 +315,12 @@ async def signup(interaction: discord.Interaction, prompt: str):
 
 
 @client.tree.command()
+@app_commands.default_permissions(manage_threads=True)
+@app_commands.guild_only()
+@app_commands.describe(prompt='Prompt given to participants for the TWOW round.')
 async def prompt(interaction: discord.Interaction, prompt: str):
     """
-    Begin a TWOW round.
+    Begin a new TWOW round with a prompt.
     """
     async def db_entry_update(session, twow, message):
         twow.current_message_id = message.id
@@ -244,8 +333,8 @@ async def prompt(interaction: discord.Interaction, prompt: str):
         invalid_entry_dict={
             TwowState.REGISTERING: '🚫 TWOW sign-ups are active! Cannot post new prompt.',
             TwowState.RESPONDING: '🚫 TWOW round is already active! Cannot post new prompt.',
-            TwowState.VOTING: '🚫 Voting is open! Please `/conclude` voting before posting a new prompt.',
-            TwowState.HIBERNATING: '🚫 No TWOW season. To start a new TWOW season, use `/signup`.'
+            TwowState.VOTING: f'🚫 Voting is open! Please {format_cmd("conclude")} voting before posting a new prompt.',
+            TwowState.HIBERNATING: f'🚫 No TWOW season. To start a new TWOW season, use {format_cmd("signup")}.'
         },
         message_content=lambda twow: f'Round {twow.current_round} Prompt:\n# {prompt}',
         view_cls=game.prompt.SubmissionView,  # TODO: fix this
@@ -254,6 +343,8 @@ async def prompt(interaction: discord.Interaction, prompt: str):
 
 
 @client.tree.command()
+@app_commands.default_permissions(manage_threads=True)
+@app_commands.guild_only()
 async def vote(interaction: discord.Interaction):
     """
     Commence voting for a TWOW round.
@@ -277,9 +368,11 @@ async def vote(interaction: discord.Interaction):
 
 
 @client.tree.command()
+@app_commands.default_permissions(manage_threads=True)
+@app_commands.guild_only()
 async def conclude(interaction: discord.Interaction):
     """
-    Revert TWOW to idle state.
+    Conclude voting for a TWOW round.
     """
     async def db_entry_update(session, twow, message):
         twow.current_message_id = message.id
@@ -291,8 +384,8 @@ async def conclude(interaction: discord.Interaction):
         invalid_entry_dict={
             TwowState.REGISTERING: '🚫 TWOW sign-ups are active! Cannot conclude round until after voting.',
             TwowState.RESPONDING: '🚫 TWOW round is active! Cannot conclude round until after voting.',
-            TwowState.IDLE: '🚫 Nothing to conclude? Use `/prompt` to start a TWOW round.',
-            TwowState.HIBERNATING: '🚫 Nothing to conclude? Use `/signup` to start a TWOW season.'
+            TwowState.IDLE: f'🚫 No active round? Use {format_cmd("prompt")} to start a TWOW round.',
+            TwowState.HIBERNATING: f'🚫 No active round? Use {format_cmd("signup")} to start a TWOW season.'
         },
         message_content=lambda twow: f'Round {twow.current_round} voting is now closed.',
         view_cls=EmptyView,  # TODO: fix this
@@ -302,23 +395,27 @@ async def conclude(interaction: discord.Interaction):
     if twow:
         await game.results.update(twow)
 
-@client.tree.command()
+@client.tree.command(name='recalculate')
+@app_commands.default_permissions(manage_threads=True)
+@app_commands.guild_only()
 async def recalculate_results(interaction: discord.Interaction):
     """
-    Recalculate the results for the current TWOW rounds.
+    Recalculate results for the current TWOW rounds.
     """
     twow = client.twows[interaction.channel_id]
     if twow.state != TwowState.IDLE:
-        await interaction.response.send_message(f'🚫 You can only present results after concluding voting.')
+        await interaction.response.send_message(f'🚫 You can only recalculate results after concluding voting.')
         logger.warning(f'{info_chip(interaction)} Result presentation attempted while not IDLE.')
         return
     await game.results.update(twow)
     await interaction.response.send_message('Results recalculated!', ephemeral=True)
 
-@client.tree.command()
+@client.tree.command(name='display')
+@app_commands.default_permissions(manage_threads=True)
+@app_commands.guild_only()
 async def display_results(interaction: discord.Interaction, channel: Optional[discord.abc.GuildChannel] = None):
     """
-    Present the results for the current TWOW round.
+    Present results for the current TWOW round.
     """
     await interaction.response.defer(ephemeral=True)
 
@@ -343,9 +440,11 @@ async def display_results(interaction: discord.Interaction, channel: Optional[di
 
 
 @client.tree.command()
+@app_commands.default_permissions(manage_threads=True)
+@app_commands.guild_only()
 async def hibernate(interaction: discord.Interaction):
     """
-    Open prompt submission between TWOW seasons.
+    Hibernate TWOW in this channel. (This opens prompt & feedback submission between seasons.)
     """
     async def db_entry_update(session, twow, message):
         twow.current_message_id = message.id
@@ -366,21 +465,25 @@ async def hibernate(interaction: discord.Interaction):
     )
 
 
+# developer commands
+
 @client.tree.command(name='eval')
+@app_commands.default_permissions(administrator=True)
+@app_commands.guilds(int(config['test server']['id']))
 async def evaluate(interaction: discord.Interaction, code: str):
     """
-    Run python code.
+    Run a line of arbitrary python code.
     """
     local_variables = {
-        "discord": discord,
-        "client": interaction.client,
-        "interaction": interaction,
-        "channel": interaction.channel,
-        "user": interaction.user,
-        "guild": interaction.guild,
-        "message": interaction.message,
-        "db": db,
-        "game": game,
+        'discord': discord,
+        'client': interaction.client,
+        'interaction': interaction,
+        'channel': interaction.channel,
+        'user': interaction.user,
+        'guild': interaction.guild,
+        'message': interaction.message,
+        'db': db,
+        'game': game,
     }
 
     stdout = io.StringIO()
@@ -388,19 +491,24 @@ async def evaluate(interaction: discord.Interaction, code: str):
     try:
         with contextlib.redirect_stdout(stdout):
             exec(
-                f"async def func():\n{textwrap.indent(code, '    ')}", local_variables,
+                f'async def func():\n{textwrap.indent(code, "    ")}', local_variables,
             )
 
-            obj = await local_variables["func"]()
-            result = f"{stdout.getvalue()}\n-- {obj}\n"
+            obj = await local_variables['func']()
+            result = f'{stdout.getvalue()}\n-- {obj}\n'
     except Exception as e:
+        await interaction.response.send_message(e)
         raise RuntimeError(e)
-    
     await interaction.response.send_message(result[0:2000])
 
 
 @client.tree.command()
-async def viewtable(interaction: discord.Interaction, name: str):
+@app_commands.default_permissions(administrator=True)
+@app_commands.guilds(int(config['test server']['id']))
+async def viewtable(interaction: discord.Interaction, name: Literal['participant', 'response', 'vote', 'twow', 'twowchannel']):
+    """
+    View one of the tables stored in the database.
+    """
     cls = {
         'participant': game.tables.Participant,
         'response': game.tables.Response,
@@ -412,5 +520,17 @@ async def viewtable(interaction: discord.Interaction, name: str):
         stmt = db.select(cls)
         entries = (await session.scalars(stmt)).all()
     await interaction.response.send_message('```' + '\n'.join(repr(entry) for entry in entries) + '```')
+
+
+@client.tree.command()
+@app_commands.default_permissions(administrator=True)
+@app_commands.guilds(int(config['test server']['id']))
+async def sync(interaction: discord.Interaction):
+    """
+    Sync global app commands to discord.
+    """
+    app_commands = await client.tree.sync()
+    await interaction.response.send_message(f'Synced {len(app_commands)} commands!')
+
 
 client.run(config['discord']['token'])
