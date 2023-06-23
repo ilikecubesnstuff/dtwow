@@ -11,12 +11,12 @@ preset = ibdp_twow
 token = <static token here>
 status = online
 
-[test server]
-id = <test server ID here>
-
 [activity]
 text = <custom text here>
 type = listening
+
+[test server]
+id = <test server ID here>
 ```
 
 ## To run the bot

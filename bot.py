@@ -249,6 +249,17 @@ async def deactivate(interaction: discord.Interaction):
         logger.warning(f'{info_chip(interaction)} INACTIVE attempted while INACTIVE. INACTIVE state preserved.')
         return
 
+    # disable old view
+    twow = client.twows[interaction.channel_id]
+    if twow.current_message_id:
+        old_message = await interaction.channel.fetch_message(twow.current_message_id)
+        old_view_cls = state_view_map[twow.state]
+        view = old_view_cls(twow)
+        for item in view.children:
+            item.disabled = True
+        await old_message.edit(content=old_message.content, view=view)
+        view.stop()
+
     twow_channel = await db.fetch_by_id(TwowChannel, interaction.channel_id)
     if interaction.channel_id in client.twows:
         del client.twows[interaction.channel_id]
