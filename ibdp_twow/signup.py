@@ -97,7 +97,7 @@ class SignUpView(discord.ui.View):
 
         modal = SignUpModal(self.twow, participant=participant, response=response)
         await interaction.response.send_modal(modal)
-    
+
     @discord.ui.button(
         label = 'View your response.',
         row = 0,

@@ -62,7 +62,7 @@ class TwowClient(discord.Client):
             stmt = db.select(Twow)
             result = await session.scalars(stmt)
             twows: list[Twow] = result.all()
-        
+
         for channel in channels:
             self.twows[channel.id] = Twow(state=TwowState.HIBERNATING)
 
@@ -73,7 +73,7 @@ class TwowClient(discord.Client):
             self.add_view(view_cls(twow), message_id=twow.current_message_id)
 
         MY_GUILD = discord.Object(id=int(config['test server']['id']))
-        # self.tree.copy_global_to(guild=MY_GUILD)
+        self.tree.copy_global_to(guild=MY_GUILD)
         await self.tree.sync(guild=MY_GUILD)
 
     async def on_ready(self):
@@ -167,7 +167,44 @@ async def help(interaction: discord.Interaction):
             value = command.description,
             inline = False
         )
-    
+
+    await interaction.response.send_message(embed=embed)
+
+
+@client.tree.command()
+@app_commands.guild_only()
+async def info(interaction: discord.Interaction):
+    """
+    Status of TWOWs in this server.
+    """
+    embed = discord.Embed(
+        title = 'Info Menu',
+        description = 'I am an [open source](https://github.com/ilikecubesnstuff/dtwow) bot created by <@279567692334235649>.\n' + \
+                      'I adapt the game Ten Words of Wisdom (TWOW) created by [carykh](https://www.youtube.com/@carykh).\n' + \
+                      'The rules are explained in [episode 0A](https://youtu.be/S64R-_LVHuY) on his YouTube channel.\n' + \
+                      'This bot adapts a few rules to make the format Discord-friendly.\n' + \
+                      '- Participants are given a prompt to respond to in 10 words.\n' + \
+                      '- Everyone then votes for their favorite responses.\n' + \
+                      '- Participants earn a score based on their ranking.\n' + \
+                      '- For the IB server, these rounds continue analogous to IB subject grades until a maximum score of 45 is reached.\n\n'
+    )
+    if not client.twows:
+        embed.description += 'No currently running TWOWs.'
+        await interaction.response.send_message(embed=embed)
+        return
+
+    embed.description += 'Current running TWOWs:'
+    for channel_id, twow in client.twows.items():
+        if twow.state == TwowState.HIBERNATING: continue
+        if twow.state == TwowState.REGISTERING: value = f'Sign-ups open!'
+        if twow.state == TwowState.RESPONDING : value = f'Round {twow.current_round} prompt.'
+        if twow.state == TwowState.VOTING     : value = f'Round {twow.current_round} voting.'
+        if twow.state == TwowState.IDLE       : value = f'Round {twow.current_round} finished.'
+        embed.add_field(
+            name = f'<#{channel_id}>',
+            value = value
+        )
+
     await interaction.response.send_message(embed=embed)
 
 
@@ -183,7 +220,6 @@ async def activate(interaction: discord.Interaction, host: discord.Role):
     """
     if not isinstance(interaction.channel, discord.TextChannel):
         await interaction.response.send_message(f'🚫 TWOW only works in text channels.')
-        state = client.twows[interaction.channel_id].state.name
         logger.warning(f'{info_chip(interaction)} Activation attempted in an unsupported channel.')
         return
 
@@ -256,7 +292,7 @@ async def twow_cmd(
             item.disabled = True
         await old_message.edit(content=old_message.content, view=view)
         view.stop()
-    
+
     # create new TWOW if necessary
     if new_state == TwowState.REGISTERING:
         async with db.session() as session:

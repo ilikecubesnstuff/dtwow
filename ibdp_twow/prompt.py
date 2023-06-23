@@ -92,7 +92,7 @@ class SubmissionView(discord.ui.View):
 
         name = participant.moniker or interaction.user.name
         await interaction.response.send_message(f'Your response: ```{name}: "{response.content}"```', ephemeral=True)
-    
+
     @discord.ui.button(
         label = 'Delete your response.',
         row = 0,
